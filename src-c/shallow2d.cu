@@ -19,15 +19,15 @@ static const float g = 9.8;
 
 
 static
-void shallow2dv_flux(float* restrict fh,
-                     float* restrict fhu,
-                     float* restrict fhv,
-                     float* restrict gh,
-                     float* restrict ghu,
-                     float* restrict ghv,
-                     const float* restrict h,
-                     const float* restrict hu,
-                     const float* restrict hv,
+void shallow2dv_flux(float* __restrict__ fh,
+                     float* __restrict__ fhu,
+                     float* __restrict__ fhv,
+                     float* __restrict__ gh,
+                     float* __restrict__ ghu,
+                     float* __restrict__ ghv,
+                     const float* __restrict__ h,
+                     const float* __restrict__ hu,
+                     const float* __restrict__ hv,
                      float g,
                      int ncell)
 {
@@ -45,10 +45,10 @@ void shallow2dv_flux(float* restrict fh,
 
 
 static
-void shallow2dv_speed(float* restrict cxy,
-                      const float* restrict h,
-                      const float* restrict hu,
-                      const float* restrict hv,
+void shallow2dv_speed(float* __restrict__ cxy,
+                      const float* __restrict__ h,
+                      const float* __restrict__ hu,
+                      const float* __restrict__ hv,
                       float g,
                       int ncell)
 {

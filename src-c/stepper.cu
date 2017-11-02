@@ -41,6 +41,40 @@ central2d_t* central2d_init(float w, float h, int nx, int ny,
     sim->g  = sim->u + 3*N;
     sim->scratch = sim->u + 4*N;
 
+/*
+    central2d_t* gpu = (central2d_t*) malloc(sizeof(central2d_t));
+    gpu = sim ; 
+
+    cudaMalloc((void**) &(gpu->nx), sizeof(int));
+    cudaMemcpy(&gpu->nx,&sim->nx,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->ny), sizeof(int));
+    cudaMemcpy(&gpu->ny,&sim->ny,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->ng), sizeof(int));
+    cudaMemcpy(&gpu->ng,&sim->ng,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->nfield), sizeof(int));
+    cudaMemcpy(&gpu->nfield,&sim->nfield,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->dx), sizeof(float));
+    cudaMemcpy(&gpu->dx,&sim->dx,sizeof(float),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->dy), sizeof(float));
+    cudaMemcpy(&gpu->dy,&sim->dy,sizeof(float),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**) &(gpu->flux), sizeof(flux_t));
+    cudaMemcpy(&gpu->flux,&sim->flux,sizeof(flux_t),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->speed), sizeof(speed_t));
+    cudaMemcpy(&gpu->speed,&sim->speed,sizeof(speed_t),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**) &(gpu->cfl), sizeof(float));
+    cudaMemcpy(&gpu->cfl,&sim->cfl,sizeof(float),cudaMemcpyHostToDevice);
+
+
+    cudaMalloc((void**) &(gpu->u),(4*N + 6*nx_all)* sizeof(float));
+    cudaMemcpy(&gpu->u,&sim->u,(4*N + 6*nx_all)*sizeof(float),cudaMemcpyHostToDevice);
+
+    cudaMemcpy(&gpu->v,&sim->v,sizeof(float),cudaMemcpyHostToDevice);
+    cudaMemcpy(&gpu->f,&sim->f,sizeof(float),cudaMemcpyHostToDevice);
+    cudaMemcpy(&gpu->g,&sim->g,sizeof(float),cudaMemcpyHostToDevice);
+    cudaMemcpy(&gpu->scratch,&sim->scratch,sizeof(float),cudaMemcpyHostToDevice);
+*/
     return sim;
 }
 
@@ -51,7 +85,7 @@ void central2d_free(central2d_t* sim)
     free(sim);
 }
 
-
+//__device__
 int central2d_offset(central2d_t* sim, int k, int ix, int iy)
 {
     int nx = sim->nx, ny = sim->ny, ng = sim->ng;
@@ -76,17 +110,17 @@ int central2d_offset(central2d_t* sim, int k, int ix, int iy)
  * integers `p` and `q`.
  */
 
-static inline
-void copy_subgrid(float* restrict dst,
-                  const float* restrict src,
+__device__ static inline
+void copy_subgrid(float* __restrict__ dst,
+                  const float* __restrict__ src,
                   int nx, int ny, int stride)
 {
     for (int iy = 0; iy < ny; ++iy)
         for (int ix = 0; ix < nx; ++ix)
             dst[iy*stride+ix] = src[iy*stride+ix];
 }
-
-void central2d_periodic(float* restrict u,
+__device__
+void central2d_periodic(float* __restrict__ u,
                         int nx, int ny, int ng, int nfield)
 {
     // Stride and number per field
@@ -128,7 +162,7 @@ void central2d_periodic(float* restrict u,
 
 
 // Branch-free computation of minmod of two numbers times 2s
-static inline
+__device__ static inline
 float xmin2s(float s, float a, float b) {
     float sa = copysignf(s, a);
     float sb = copysignf(s, b);
@@ -140,7 +174,7 @@ float xmin2s(float s, float a, float b) {
 
 
 // Limited combined slope estimate
-static inline
+__device__ static inline
 float limdiff(float um, float u0, float up) {
     const float theta = 2.0;
     const float quarter = 0.25;
@@ -152,9 +186,9 @@ float limdiff(float um, float u0, float up) {
 
 
 // Compute limited derivs
-static inline
-void limited_deriv1(float* restrict du,
-                    const float* restrict u,
+__device__ static inline
+void limited_deriv1(float* __restrict__ du,
+                    const float* __restrict__ u,
                     int ncell)
 {
     for (int i = 0; i < ncell; ++i)
@@ -163,9 +197,9 @@ void limited_deriv1(float* restrict du,
 
 
 // Compute limited derivs across stride
-static inline
-void limited_derivk(float* restrict du,
-                    const float* restrict u,
+__device__ static inline
+void limited_derivk(float* __restrict__ du,
+                    const float* __restrict__ u,
                     int ncell, int stride)
 {
     assert(stride > 0);
@@ -208,17 +242,17 @@ void limited_derivk(float* restrict du,
 
 
 // Predictor half-step
-static
-void central2d_predict(float* restrict v,
-                       float* restrict scratch,
-                       const float* restrict u,
-                       const float* restrict f,
-                       const float* restrict g,
+__device__ static
+void central2d_predict(float* __restrict__ v,
+                       float* __restrict__ scratch,
+                       const float* __restrict__ u,
+                       const float* __restrict__ f,
+                       const float* __restrict__ g,
                        float dtcdx2, float dtcdy2,
                        int nx, int ny, int nfield)
 {
-    float* restrict fx = scratch;
-    float* restrict gy = scratch+nx;
+    float* __restrict__ fx = scratch;
+    float* __restrict__ gy = scratch+nx;
     for (int k = 0; k < nfield; ++k) {
         for (int iy = 1; iy < ny-1; ++iy) {
             int offset = (k*ny+iy)*nx+1;
@@ -234,14 +268,14 @@ void central2d_predict(float* restrict v,
 
 
 // Corrector
-static
-void central2d_correct_sd(float* restrict s,
-                          float* restrict d,
-                          const float* restrict ux,
-                          const float* restrict uy,
-                          const float* restrict u,
-                          const float* restrict f,
-                          const float* restrict g,
+__device__ static
+void central2d_correct_sd(float* __restrict__ s,
+                          float* __restrict__ d,
+                          const float* __restrict__ ux,
+                          const float* __restrict__ uy,
+                          const float* __restrict__ u,
+                          const float* __restrict__ f,
+                          const float* __restrict__ g,
                           float dtcdx2, float dtcdy2,
                           int xlo, int xhi)
 {
@@ -258,12 +292,12 @@ void central2d_correct_sd(float* restrict s,
 
 
 // Corrector
-static
-void central2d_correct(float* restrict v,
-                       float* restrict scratch,
-                       const float* restrict u,
-                       const float* restrict f,
-                       const float* restrict g,
+__device__ static
+void central2d_correct(float* __restrict__ v,
+                       float* __restrict__ scratch,
+                       const float* __restrict__ u,
+                       const float* __restrict__ f,
+                       const float* __restrict__ g,
                        float dtcdx2, float dtcdy2,
                        int xlo, int xhi, int ylo, int yhi,
                        int nx, int ny, int nfield)
@@ -271,19 +305,19 @@ void central2d_correct(float* restrict v,
     assert(0 <= xlo && xlo < xhi && xhi <= nx);
     assert(0 <= ylo && ylo < yhi && yhi <= ny);
 
-    float* restrict ux = scratch;
-    float* restrict uy = scratch +   nx;
-    float* restrict s0 = scratch + 2*nx;
-    float* restrict d0 = scratch + 3*nx;
-    float* restrict s1 = scratch + 4*nx;
-    float* restrict d1 = scratch + 5*nx;
+    float* __restrict__ ux = scratch;
+    float* __restrict__ uy = scratch +   nx;
+    float* __restrict__ s0 = scratch + 2*nx;
+    float* __restrict__ d0 = scratch + 3*nx;
+    float* __restrict__ s1 = scratch + 4*nx;
+    float* __restrict__ d1 = scratch + 5*nx;
 
     for (int k = 0; k < nfield; ++k) {
 
-        float*       restrict vk = v + k*ny*nx;
-        const float* restrict uk = u + k*ny*nx;
-        const float* restrict fk = f + k*ny*nx;
-        const float* restrict gk = g + k*ny*nx;
+        float*       __restrict__ vk = v + k*ny*nx;
+        const float* __restrict__ uk = u + k*ny*nx;
+        const float* __restrict__ fk = f + k*ny*nx;
+        const float* __restrict__ gk = g + k*ny*nx;
 
         limited_deriv1(ux+1, uk+ylo*nx+1, nx-2);
         limited_derivk(uy+1, uk+ylo*nx+1, nx-2, nx);
@@ -310,11 +344,11 @@ void central2d_correct(float* restrict v,
 }
 
 
-static
-void central2d_step(float* restrict u, float* restrict v,
-                    float* restrict scratch,
-                    float* restrict f,
-                    float* restrict g,
+__device__ static
+void central2d_step(float* __restrict__ u, float* __restrict__ v,
+                    float* __restrict__ scratch,
+                    float* __restrict__ f,
+                    float* __restrict__ g,
                     int io, int nx, int ny, int ng,
                     int nfield, flux_t flux, speed_t speed,
                     float dt, float dx, float dy)
@@ -357,11 +391,11 @@ void central2d_step(float* restrict u, float* restrict v,
  * at the end lives on the main grid instead of the staggered grid.
  */
 
-static
-int central2d_xrun(float* restrict u, float* restrict v,
-                   float* restrict scratch,
-                   float* restrict f,
-                   float* restrict g,
+__global__ static
+void central2d_xrun(float* __restrict__ u, float* __restrict__ v,
+                   float* __restrict__ scratch,
+                   float* __restrict__ f,
+                   float* __restrict__ g,
                    int nx, int ny, int ng,
                    int nfield, flux_t flux, speed_t speed,
                    float tfinal, float dx, float dy, float cfl)
@@ -391,15 +425,66 @@ int central2d_xrun(float* restrict u, float* restrict v,
         t += 2*dt;
         nstep += 2;
     }
-    return nstep;
+    //return nstep;
 }
 
 
 int central2d_run(central2d_t* sim, float tfinal)
 {
-    return central2d_xrun(sim->u, sim->v, sim->scratch,
-                          sim->f, sim->g,
-                          sim->nx, sim->ny, sim->ng,
-                          sim->nfield, sim->flux, sim->speed,
-                          tfinal, sim->dx, sim->dy, sim->cfl);
+    float tfinal_d;
+
+    cudaMalloc((void**) &(tfinal_d), sizeof(float));
+    cudaMemcpy(&tfinal_d,&tfinal,sizeof(float),cudaMemcpyHostToDevice);
+
+
+    central2d_t* gpu = (central2d_t*) malloc(sizeof(central2d_t));
+    gpu = sim ; 
+
+    cudaMalloc((void**) &(gpu->nx), sizeof(int));
+    cudaMemcpy(&gpu->nx,&sim->nx,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->ny), sizeof(int));
+    cudaMemcpy(&gpu->ny,&sim->ny,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->ng), sizeof(int));
+    cudaMemcpy(&gpu->ng,&sim->ng,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->nfield), sizeof(int));
+    cudaMemcpy(&gpu->nfield,&sim->nfield,sizeof(int),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->dx), sizeof(float));
+    cudaMemcpy(&gpu->dx,&sim->dx,sizeof(float),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->dy), sizeof(float));
+    cudaMemcpy(&gpu->dy,&sim->dy,sizeof(float),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**) &(gpu->flux), sizeof(flux_t));
+    cudaMemcpy(&gpu->flux,&sim->flux,sizeof(flux_t),cudaMemcpyHostToDevice);
+    cudaMalloc((void**) &(gpu->speed), sizeof(speed_t));
+    cudaMemcpy(&gpu->speed,&sim->speed,sizeof(speed_t),cudaMemcpyHostToDevice);
+
+    cudaMalloc((void**) &(gpu->cfl), sizeof(float));
+    cudaMemcpy(&gpu->cfl,&sim->cfl,sizeof(float),cudaMemcpyHostToDevice);
+
+    int nx = sim->nx;
+    int ny = sim->ny;
+    int ng = sim->ng;
+    int nfield = sim->nfield;
+
+    int nx_all = nx + 2*ng;
+    int ny_all = ny + 2*ng;
+    int nc = nx_all * ny_all;
+    int N  = nfield * nc;
+
+    cudaMalloc((void**) &(gpu->u),(4*N + 6*nx_all)* sizeof(float));
+    cudaMemcpy(&gpu->u,&sim->u,N*sizeof(float),cudaMemcpyHostToDevice);
+
+    cudaMemcpy(&gpu->v,&sim->v,N*sizeof(float),cudaMemcpyHostToDevice);
+    cudaMemcpy(&gpu->f,&sim->f,N*sizeof(float),cudaMemcpyHostToDevice);
+    cudaMemcpy(&gpu->g,&sim->g,N*sizeof(float),cudaMemcpyHostToDevice);
+    cudaMemcpy(&gpu->scratch,&sim->scratch,6*nx_all*sizeof(float),cudaMemcpyHostToDevice);
+
+     central2d_xrun<<<1,1>>>(gpu->u, gpu->v, gpu->scratch,
+                          gpu->f, gpu->g,
+                          gpu->nx, gpu->ny, gpu->ng,
+                          gpu->nfield, gpu->flux, gpu->speed,
+                          tfinal_d, gpu->dx, gpu->dy, gpu->cfl);
+
+    int nstep =10; 
+    return nstep;
 }
